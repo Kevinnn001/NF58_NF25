@@ -187,12 +187,15 @@ class Cashier:
         # Create a summary of discounts
         discounts_summary = "; ".join(discounts_used) if discounts_used else "None"
 
+        # Calculate total before discounts
+        total_before_discounts = sum(details['price'] * details['quantity'] for details in cart.values())
+
         # Create a Receipt instance
         receipt = Receipt(
             receipt_id=receipt_id,
             date=date_obj,
             products=products_summary,
-            total_before_discounts=sum(details['price'] * details['quantity'] for details in cart.values()),
+            total_before_discounts=total_before_discounts,
             discounts_applied=discounts_summary,
             final_total=total,
             payment_method=payment_method,
@@ -210,7 +213,7 @@ class Cashier:
             st.error(f"Failed to log receipt to the database: {e}")
 
     def log_receipt(self, cart, total, payment_method, payment_amount, change, discounts_used):
-        """Log the receipt to the SQLite database and generate receipt content."""
+        """Log the receipt to SQLite and generate receipt content."""
         # Generate receipt content for display (optional)
         utc_now = datetime.datetime.now(pytz.utc).astimezone(pytz.timezone("Asia/Hong_Kong"))
         receipt_content = f"--- Receipt ---\n"
@@ -245,3 +248,74 @@ class Cashier:
         self.log_receipt_to_sqlite(cart, total, payment_method, payment_amount, change, discounts_used)
 
         return receipt_content
+
+# Initialize the Streamlit App
+st.title("印蛇出動 NF25 & NF58")
+
+# Initialize session state
+if "cart" not in st.session_state:
+    st.session_state.cart = {}
+
+# Initialize Cashier
+cashier = Cashier()
+
+# Sidebar Menu
+menu = st.sidebar.radio("Menu", ["View Products", "Add to Cart", "View Cart", "Checkout"])
+
+if menu == "View Products":
+    st.header("Available Products")
+    for pid, details in cashier.products.items():
+        st.write(f"{pid}: {details['name']} - ${details['price']} (Stock: {details['stock']})")
+
+elif menu == "Add to Cart":
+    st.header("Add to Cart")
+
+    # Map product names to IDs for selection
+    product_name_to_id = {details["name"]: pid for pid, details in cashier.products.items()}
+    product_name = st.selectbox("Select Product", list(product_name_to_id.keys()))
+    product_id = product_name_to_id[product_name]
+
+    quantity = st.number_input("Quantity", min_value=1, step=1, value=1)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Add to Cart"):
+            message = cashier.add_to_cart(st.session_state.cart, product_id, quantity)
+            st.success(message)
+
+    with col2:
+        if st.button("Clear Cart"):
+            st.session_state.cart = {}
+            st.success("Cart has been cleared.")
+
+elif menu == "View Cart":
+    st.header("Your Cart")
+    cart_items, total = cashier.view_cart(st.session_state.cart)
+    if cart_items is None:
+        st.warning("Your cart is empty.")
+    else:
+        st.table(cart_items)
+        st.write(f"Total: ${total:.2f}")
+
+elif menu == "Checkout":
+    st.header("Checkout")
+    apply_coupon = st.checkbox("Apply Coupon ($5 off)")
+    checkout_summary, final_total, discounts_used = cashier.checkout(st.session_state.cart, apply_coupon=apply_coupon)
+    st.text(checkout_summary)
+
+    if final_total > 0:
+        payment_method = st.selectbox("Select Payment Method", ["Cash", "PayMe", "支付寶", "轉數快"])
+        payment_amount = st.number_input("Enter Payment Amount", min_value=0.0, step=0.01, format="%.2f")
+        if st.button("Finalize Payment"):
+            if payment_amount >= final_total:
+                change = payment_amount - final_total
+                receipt_content = cashier.log_receipt(
+                    st.session_state.cart, final_total, payment_method, payment_amount, change, discounts_used
+                )
+                st.success(f"Payment successful! Change: ${change:.2f}")
+                st.info("Receipt:")
+                st.text(receipt_content)
+                st.session_state.cart = {}
+            else:
+                st.error(f"Insufficient payment. You still owe ${final_total - payment_amount:.2f}.")
