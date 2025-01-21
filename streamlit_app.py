@@ -1,15 +1,3 @@
-import sys
-import subprocess
-
-def install_openpyxl():
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
-
-try:
-    import openpyxl
-except ImportError:
-    install_openpyxl()
-    import openpyxl
-
 import streamlit as st
 import os
 import datetime
