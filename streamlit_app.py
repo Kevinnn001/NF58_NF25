@@ -1,3 +1,5 @@
+pip install openpyxl
+
 import streamlit as st
 import os
 import datetime
