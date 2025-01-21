@@ -1,1 +1,6 @@
 streamlit
+streamlit
+pandas
+openpyxl
+pytz
+# Add any other dependencies your app requires
