@@ -1,6 +1,5 @@
-streamlit
-pandas
-openpyxl
-SQLAlchemy
-psycopg2-binary
-pytz
+streamlit==1.41.1
+pandas==1.5.3
+openpyxl==3.1.2
+SQLAlchemy==1.4.46
+pytz==2023.3
