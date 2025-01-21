@@ -1,8 +1,6 @@
-  streamlit as st
-  os
-  datetime
-  pytz  # Library for timezone handling
-  pandas as pd
-from sqlalchemy   create_engine, Column, String, Integer, Float, DateTime, Text
-from sqlalchemy.ext.declarative   declarative_base
-from sqlalchemy.orm   sessionmaker
+streamlit
+pandas
+openpyxl
+SQLAlchemy
+psycopg2-binary
+pytz
