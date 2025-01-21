@@ -4,6 +4,7 @@ import datetime
 import pytz  # Library for timezone handling
 import pandas as pd
 
+# Define the Cashier class
 class Cashier:
     def __init__(self):
         # Define products with initial stock
@@ -195,12 +196,6 @@ class Cashier:
 
         # Append to the Excel file
         with pd.ExcelWriter(self.excel_file, engine='openpyxl', mode='a' if file_exists else 'w', if_sheet_exists='overlay') as writer:
-            # Load existing workbook
-            if file_exists:
-                writer.book = pd.read_excel(self.excel_file, sheet_name=self.excel_sheet, engine='openpyxl').book
-            else:
-                writer.book = None
-
             # Write the DataFrame to the sheet
             df.to_excel(writer, index=False, header=not file_exists, sheet_name=self.excel_sheet, startrow=writer.sheets[self.excel_sheet].max_row if file_exists else 0)
 
@@ -242,3 +237,71 @@ class Cashier:
         self.log_receipt_to_excel(cart, total, payment_method, payment_amount, change, discounts_used)
 
         return receipt_content
+
+# Streamlit App
+st.title("印蛇出動 NF25 & NF58")
+
+# Initialize session state
+if "cart" not in st.session_state:
+    st.session_state.cart = {}
+
+cashier = Cashier()
+
+menu = st.sidebar.radio("Menu", ["View Products", "Add to Cart", "View Cart", "Checkout"])
+
+if menu == "View Products":
+    st.header("Available Products")
+    for pid, details in cashier.products.items():
+        st.write(f"{pid}: {details['name']} - ${details['price']} (Stock: {details['stock']})")
+
+elif menu == "Add to Cart":
+    st.header("Add to Cart")
+    
+    product_name_to_id = {details["name"]: pid for pid, details in cashier.products.items()}
+    product_name = st.selectbox("Select Product", list(product_name_to_id.keys()))
+    product_id = product_name_to_id[product_name]
+    
+    quantity = st.number_input("Quantity", min_value=1, step=1)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Add to Cart"):
+            message = cashier.add_to_cart(st.session_state.cart, product_id, quantity)
+            st.success(message)
+    
+    with col2:
+        if st.button("Clear Cart"):
+            st.session_state.cart = {}
+            st.success("Cart has been cleared.")
+
+elif menu == "View Cart":
+    st.header("Your Cart")
+    cart_items, total = cashier.view_cart(st.session_state.cart)
+    if cart_items is None:
+        st.warning("Your cart is empty.")
+    else:
+        st.table(cart_items)
+        st.write(f"Total: ${total:.2f}")
+
+elif menu == "Checkout":
+    st.header("Checkout")
+    apply_coupon = st.checkbox("Apply Coupon ($5 off)")
+    checkout_summary, final_total, discounts_used = cashier.checkout(st.session_state.cart, apply_coupon=apply_coupon)
+    st.text(checkout_summary)
+
+    if final_total > 0:
+        payment_method = st.selectbox("Select Payment Method", ["Cash", "PayMe", "支付寶", "轉數快"])
+        payment_amount = st.number_input("Enter Payment Amount", min_value=0.0, step=0.01)
+        if st.button("Finalize Payment"):
+            if payment_amount >= final_total:
+                change = payment_amount - final_total
+                receipt_content = cashier.log_receipt(
+                    st.session_state.cart, final_total, payment_method, payment_amount, change, discounts_used
+                )
+                st.success(f"Payment successful! Change: ${change:.2f}")
+                st.info("Receipt logged successfully in Excel.")
+                st.text(receipt_content)
+                st.session_state.cart = {}
+            else:
+                st.error(f"Insufficient payment. You still owe ${final_total - payment_amount:.2f}.")
