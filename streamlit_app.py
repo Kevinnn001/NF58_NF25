@@ -6,6 +6,17 @@ import pandas as pd
 from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import logging
+
+# Configure logging
+logging.basicConfig(
+    filename='app.log',
+    filemode='a',
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+logger = logging.getLogger()
 
 # Define the ORM base
 Base = declarative_base()
@@ -58,10 +69,21 @@ class Cashier:
 
     def setup_database(self):
         """Initialize the SQLite database and create tables if they don't exist."""
-        self.engine = create_engine(f'sqlite:///{self.database_file}', echo=False)
-        Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        try:
+            self.engine = create_engine(f'sqlite:///{self.database_file}', echo=False)
+            Base.metadata.create_all(self.engine)
+            Session = sessionmaker(bind=self.engine)
+            self.session = Session()
+            st.success(f"Database '{self.database_file}' initialized successfully.")
+            logger.info(f"Database '{self.database_file}' initialized successfully.")
+        except Exception as e:
+            st.error(f"Error setting up the database: {e}")
+            logger.error(f"Error setting up the database: {e}")
+
+        # Display absolute path for confirmation
+        abs_path = os.path.abspath(self.database_file)
+        st.write(f"Database absolute path: {abs_path}")
+        logger.info(f"Database absolute path: {abs_path}")
 
     def add_to_cart(self, cart, product_id, quantity):
         """Add a product to the cart."""
@@ -208,9 +230,11 @@ class Cashier:
             self.session.add(receipt)
             self.session.commit()
             st.success("Receipt logged successfully in the database.")
+            logger.info(f"Receipt {receipt_id} logged successfully.")
         except Exception as e:
             self.session.rollback()
             st.error(f"Failed to log receipt to the database: {e}")
+            logger.error(f"Failed to log receipt {receipt_id}: {e}")
 
     def log_receipt(self, cart, total, payment_method, payment_amount, change, discounts_used):
         """Log the receipt to SQLite and generate receipt content."""
@@ -249,6 +273,32 @@ class Cashier:
 
         return receipt_content
 
+    def view_receipts(self):
+        """Display all receipts from the database for debugging."""
+        try:
+            receipts = self.session.query(Receipt).all()
+            if receipts:
+                data = [{
+                    "Receipt ID": r.receipt_id,
+                    "Date": r.date,
+                    "Products": r.products,
+                    "Total Before Discounts": r.total_before_discounts,
+                    "Discounts Applied": r.discounts_applied,
+                    "Final Total": r.final_total,
+                    "Payment Method": r.payment_method,
+                    "Payment Amount": r.payment_amount,
+                    "Change": r.change
+                } for r in receipts]
+                df = pd.DataFrame(data)
+                st.dataframe(df)
+                logger.info("Displayed all receipts.")
+            else:
+                st.info("No receipts found in the database.")
+                logger.info("No receipts found in the database to display.")
+        except Exception as e:
+            st.error(f"Failed to retrieve receipts: {e}")
+            logger.error(f"Failed to retrieve receipts: {e}")
+
 # Initialize the Streamlit App
 st.title("印蛇出動 NF25 & NF58")
 
@@ -259,8 +309,14 @@ if "cart" not in st.session_state:
 # Initialize Cashier
 cashier = Cashier()
 
+# List directory contents for debugging
+st.write("#### Current Directory Contents:")
+dir_contents = os.listdir('.')
+st.write(dir_contents)
+logger.info(f"Current directory contents: {dir_contents}")
+
 # Sidebar Menu
-menu = st.sidebar.radio("Menu", ["View Products", "Add to Cart", "View Cart", "Checkout"])
+menu = st.sidebar.radio("Menu", ["View Products", "Add to Cart", "View Cart", "Checkout", "View Receipts"])
 
 if menu == "View Products":
     st.header("Available Products")
@@ -283,11 +339,13 @@ elif menu == "Add to Cart":
         if st.button("Add to Cart"):
             message = cashier.add_to_cart(st.session_state.cart, product_id, quantity)
             st.success(message)
+            logger.info(f"Added {quantity} x '{cashier.products[product_id]['name']}' to the cart.")
 
     with col2:
         if st.button("Clear Cart"):
             st.session_state.cart = {}
             st.success("Cart has been cleared.")
+            logger.info("Cleared the cart.")
 
 elif menu == "View Cart":
     st.header("Your Cart")
@@ -297,12 +355,14 @@ elif menu == "View Cart":
     else:
         st.table(cart_items)
         st.write(f"Total: ${total:.2f}")
+        logger.info(f"Viewed cart with total: ${total:.2f}")
 
 elif menu == "Checkout":
     st.header("Checkout")
     apply_coupon = st.checkbox("Apply Coupon ($5 off)")
     checkout_summary, final_total, discounts_used = cashier.checkout(st.session_state.cart, apply_coupon=apply_coupon)
     st.text(checkout_summary)
+    logger.info(f"Checkout summary generated with final total: ${final_total:.2f}")
 
     if final_total > 0:
         payment_method = st.selectbox("Select Payment Method", ["Cash", "PayMe", "支付寶", "轉數快"])
@@ -316,6 +376,13 @@ elif menu == "Checkout":
                 st.success(f"Payment successful! Change: ${change:.2f}")
                 st.info("Receipt:")
                 st.text(receipt_content)
+                logger.info(f"Payment finalized. Change given: ${change:.2f}")
                 st.session_state.cart = {}
+                logger.info("Cart cleared after payment.")
             else:
                 st.error(f"Insufficient payment. You still owe ${final_total - payment_amount:.2f}.")
+                logger.warning(f"Insufficient payment: Paid ${payment_amount:.2f}, owed ${final_total - payment_amount:.2f}.")
+
+elif menu == "View Receipts":
+    st.header("All Receipts")
+    cashier.view_receipts()
