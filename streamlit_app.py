@@ -3,8 +3,6 @@ import os
 import datetime
 import pytz  # Library for timezone handling
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # Define the Cashier class
 class Cashier:
@@ -34,12 +32,11 @@ class Cashier:
             {"threshold": 350, "discount": 40},
         ]
 
-        # Define the receipt log file
-        self.receipt_log_file = "receipt_log.txt"
-
-        # Setup Excel Logging
+        # Define the receipt log Excel file
         self.excel_file = "receipts.xlsx"
         self.excel_sheet = "Receipts"
+
+        # Initialize the Excel file with headers if it doesn't exist
         if not os.path.exists(self.excel_file):
             df = pd.DataFrame(columns=[
                 "Receipt ID",
@@ -53,21 +50,6 @@ class Cashier:
                 "Change"
             ])
             df.to_excel(self.excel_file, index=False, sheet_name=self.excel_sheet)
-
-        # Setup Google Sheets Logging
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds_path = 'path_to_your_credentials.json'  # Replace with your credentials path
-        if os.path.exists(creds_path):
-            try:
-                creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-                self.gc = gspread.authorize(creds)
-                self.sheet = self.gc.open("Receipts").sheet1  # Replace "Receipts" with your sheet name
-            except Exception as e:
-                st.error(f"Google Sheets initialization failed: {e}")
-                self.sheet = None
-        else:
-            st.error("Google Sheets credentials file not found.")
-            self.sheet = None
 
     def add_to_cart(self, cart, product_id, quantity):
         """Add a product to the cart."""
@@ -209,61 +191,22 @@ class Cashier:
         # Convert to DataFrame
         df = pd.DataFrame([receipt_data])
 
+        # Check if file exists to determine header
+        file_exists = os.path.isfile(self.excel_file)
+
         # Append to the Excel file
-        with pd.ExcelWriter(self.excel_file, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-            # Load existing workbook
-            writer.book = pd.ExcelFile(self.excel_file).book
-            writer.sheets = {ws.title: ws for ws in writer.book.worksheets}
-            # Determine the next empty row
-            startrow = writer.sheets[self.excel_sheet].max_row
-            # Write the DataFrame to the next row without headers
-            df.to_excel(writer, index=False, header=False, sheet_name=self.excel_sheet, startrow=startrow)
-        
+        with pd.ExcelWriter(self.excel_file, engine='openpyxl', mode='a' if file_exists else 'w', if_sheet_exists='overlay') as writer:
+            # Write the DataFrame to the sheet
+            df.to_excel(writer, index=False, header=not file_exists, sheet_name=self.excel_sheet, startrow=writer.sheets[self.excel_sheet].max_row if file_exists else 0)
+
         return receipt_data  # Optional: Return the data if needed elsewhere
 
-    def log_receipt_to_google_sheets(self, cart, total, payment_method, payment_amount, change, discounts_used):
-        """Log the receipt to Google Sheets."""
-        if not self.sheet:
-            st.error("Google Sheet is not initialized.")
-            return
-
-        receipt_id = datetime.datetime.now().strftime('%Y%m%d%H%M%S')  # Unique ID based on timestamp
-        utc_now = datetime.datetime.now(pytz.utc).astimezone(pytz.timezone("Asia/Hong_Kong"))
-        date_str = utc_now.strftime('%Y-%m-%d %H:%M:%S')
-
-        # Create a summary of the products
-        products_summary = "; ".join([f"{details['name']} x {details['quantity']}" for details in cart.values()])
-
-        # Create a summary of discounts
-        discounts_summary = "; ".join(discounts_used) if discounts_used else "None"
-
-        # Prepare the data row
-        row = [
-            receipt_id,
-            date_str,
-            products_summary,
-            sum(details['price'] * details['quantity'] for details in cart.values()),
-            discounts_summary,
-            total,
-            payment_method,
-            payment_amount,
-            change
-        ]
-
-        # Append the row to Google Sheets
-        try:
-            self.sheet.append_row(row)
-        except Exception as e:
-            st.error(f"Failed to append to Google Sheets: {e}")
-
     def log_receipt(self, cart, total, payment_method, payment_amount, change, discounts_used):
-        """Log the receipt in a single receipt log file."""
-        # Get the current time in UTC+8
-        utc_now = datetime.datetime.now(pytz.utc)
-        utc_plus_8 = utc_now.astimezone(pytz.timezone("Asia/Hong_Kong"))
-
+        """Log the receipt to an Excel file."""
+        # Generate receipt content for display (optional)
+        utc_now = datetime.datetime.now(pytz.utc).astimezone(pytz.timezone("Asia/Hong_Kong"))
         receipt_content = f"--- Receipt ---\n"
-        receipt_content += f"Date: {utc_plus_8.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8)\n\n"
+        receipt_content += f"Date: {utc_now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8)\n\n"
 
         receipt_content += "{:<20} {:<10} {:<10} {:<10}\n".format(
             "Product Name", "Quantity", "Price ($)", "Subtotal ($)"
@@ -290,18 +233,10 @@ class Cashier:
         receipt_content += f"Change: ${change:.2f}\n"
         receipt_content += "--- Thank You! ---\n\n"
 
-        # Log to text file
-        with open(self.receipt_log_file, "a", encoding="utf-8") as f:
-            f.write(receipt_content)
-
         # Log to Excel
         self.log_receipt_to_excel(cart, total, payment_method, payment_amount, change, discounts_used)
 
-        # Log to Google Sheets
-        self.log_receipt_to_google_sheets(cart, total, payment_method, payment_amount, change, discounts_used)
-
         return receipt_content
-
 
 # Streamlit App
 st.title("印蛇出動 NF25 & NF58")
@@ -351,7 +286,7 @@ elif menu == "View Cart":
 
 elif menu == "Checkout":
     st.header("Checkout")
-    apply_coupon = st.checkbox("Po story?")
+    apply_coupon = st.checkbox("Apply Coupon ($5 off)")
     checkout_summary, final_total, discounts_used = cashier.checkout(st.session_state.cart, apply_coupon=apply_coupon)
     st.text(checkout_summary)
 
@@ -365,7 +300,7 @@ elif menu == "Checkout":
                     st.session_state.cart, final_total, payment_method, payment_amount, change, discounts_used
                 )
                 st.success(f"Payment successful! Change: ${change:.2f}")
-                st.info("Receipt logged successfully.")
+                st.info("Receipt logged successfully in Excel.")
                 st.text(receipt_content)
                 st.session_state.cart = {}
             else:
