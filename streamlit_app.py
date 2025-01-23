@@ -91,20 +91,7 @@ class Cashier:
             st.error(f"Error initializing default products: {e}")
             logger.error(f"Error initializing default products: {e}")
             self.session.rollback()
-    
-        # Define package discounts
-        self.packages = [
-            {"name": "一袋一布帶", "required_products": {1: 1, 2: 1}, "discount": 10},
-            {"name": "兩布帶", "required_products": {1: 2}, "discount": 5},
-            {"name": "兩袋", "required_products": {2: 2}, "discount": 10},
-        ]
-
-        # Define fixed amount discounts
-        self.fixed_discounts = [
-            {"threshold": 220, "discount": 20},
-            {"threshold": 350, "discount": 40},
-        ]
-
+            
     def get_all_products(self):
         """Retrieve all products from the database."""
         try:
