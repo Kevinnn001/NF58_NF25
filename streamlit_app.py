@@ -70,22 +70,6 @@ class Cashier:
             logger.error(f"Error setting up the database: {e}")
             st.stop()
         
-        # Display absolute path for confirmation
-        abs_path = os.path.abspath(self.database_file)
-        st.write(f"Database absolute path: {abs_path}")
-        logger.info(f"Database absolute path: {abs_path}")
-        
-        # Display current working directory
-        cwd = os.getcwd()
-        st.write(f"Current Working Directory: {cwd}")
-        logger.info(f"Current Working Directory: {cwd}")
-        
-        # List directory contents
-        st.write("#### Files in Current Directory:")
-        dir_contents = os.listdir('.')
-        st.write(dir_contents)
-        logger.info(f"Directory Contents: {dir_contents}")
-    
     def initialize_default_products(self):
         """Initialize the database with default products."""
         try:
