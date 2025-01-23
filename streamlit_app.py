@@ -48,6 +48,19 @@ class Product(Base):
 
 class Cashier:
     def __init__(self):
+        # Define package discounts
+        self.packages = [
+            {"name": "一袋一布帶", "required_products": {1: 1, 2: 1}, "discount": 10},
+            {"name": "兩布帶", "required_products": {1: 2}, "discount": 5},
+            {"name": "兩袋", "required_products": {2: 2}, "discount": 10},
+        ]
+
+        # Define fixed amount discounts
+        self.fixed_discounts = [
+            {"threshold": 220, "discount": 20},
+            {"threshold": 350, "discount": 40},
+        ]
+
         # Setup SQLite Database
         self.database_file = 'receipts.db'
         self.setup_database()
@@ -55,7 +68,7 @@ class Cashier:
         # Initialize default products if the products table is empty
         if self.session.query(Product).count() == 0:
             self.initialize_default_products()
-    
+
     def setup_database(self):
         """Initialize the SQLite database and create tables if they don't exist."""
         try:
@@ -70,6 +83,22 @@ class Cashier:
             logger.error(f"Error setting up the database: {e}")
             st.stop()
         
+        # Display absolute path for confirmation
+        abs_path = os.path.abspath(self.database_file)
+        # st.write(f"Database absolute path: {abs_path}")  # Removed from frontend
+        logger.info(f"Database absolute path: {abs_path}")
+        
+        # Display current working directory
+        cwd = os.getcwd()
+        # st.write(f"Current Working Directory: {cwd}")  # Removed from frontend
+        logger.info(f"Current Working Directory: {cwd}")
+        
+        # List directory contents
+        # st.write("#### Files in Current Directory:")  # Removed from frontend
+        dir_contents = os.listdir('.')
+        # st.write(dir_contents)  # Removed from frontend
+        logger.info(f"Directory Contents: {dir_contents}")
+
     def initialize_default_products(self):
         """Initialize the database with default products."""
         try:
@@ -91,7 +120,7 @@ class Cashier:
             st.error(f"Error initializing default products: {e}")
             logger.error(f"Error initializing default products: {e}")
             self.session.rollback()
-            
+
     def get_all_products(self):
         """Retrieve all products from the database."""
         try:
@@ -101,7 +130,7 @@ class Cashier:
             st.error(f"Error retrieving products: {e}")
             logger.error(f"Error retrieving products: {e}")
             return []
-    
+
     def add_product(self, name, price, stock):
         """Add a new product to the database."""
         try:
@@ -114,7 +143,7 @@ class Cashier:
             st.error(f"Error adding product: {e}")
             logger.error(f"Error adding product '{name}': {e}")
             self.session.rollback()
-    
+
     def edit_product(self, product_id, name, price, stock):
         """Edit an existing product in the database."""
         try:
@@ -133,7 +162,7 @@ class Cashier:
             st.error(f"Error editing product: {e}")
             logger.error(f"Error editing product ID {product_id}: {e}")
             self.session.rollback()
-    
+
     def delete_product(self, product_id):
         """Delete a product from the database."""
         try:
@@ -150,7 +179,7 @@ class Cashier:
             self.session.rollback()
             st.error(f"Error deleting product: {e}")
             logger.error(f"Error deleting product ID {product_id}: {e}")
-    
+
     def add_to_cart(self, cart, product_id, quantity):
         """Add a product to the cart."""
         try:
@@ -169,6 +198,8 @@ class Cashier:
                         "price": product.price,
                         "quantity": quantity,
                     }
+                product.stock -= quantity  # Decrement stock
+                self.session.commit()
                 logger.info(f"Added {quantity} x '{product.name}' to the cart.")
                 return f"Added {quantity} x '{product.name}' to the cart."
             else:
@@ -176,8 +207,9 @@ class Cashier:
         except Exception as e:
             st.error(f"Error adding to cart: {e}")
             logger.error(f"Error adding to cart: {e}")
+            self.session.rollback()
             return "An error occurred while adding to the cart."
-    
+
     def view_cart(self, cart):
         """Generate a summary of the cart."""
         try:
@@ -202,26 +234,26 @@ class Cashier:
             st.error(f"Error viewing cart: {e}")
             logger.error(f"Error viewing cart: {e}")
             return None, 0
-    
+
     def apply_package_discounts(self, cart):
         """Apply package discounts to the cart."""
         try:
             savings = 0
             details = []
             available_quantities = {pid: details["quantity"] for pid, details in cart.items()}
-    
+
             for package in self.packages:
                 required_products = package["required_products"]
                 discount_amount = package["discount"]
                 package_name = package["name"]
                 times_applicable = float("inf")
-    
+
                 for pid, qty_required in required_products.items():
                     if pid not in available_quantities or available_quantities[pid] < qty_required:
                         times_applicable = 0
                         break
                     times_applicable = min(times_applicable, available_quantities[pid] // qty_required)
-    
+
                 if times_applicable > 0:
                     savings += discount_amount * times_applicable
                     details.append(
@@ -229,14 +261,14 @@ class Cashier:
                     )
                     for pid, qty_required in required_products.items():
                         available_quantities[pid] -= qty_required * times_applicable
-    
+
             logger.info(f"Package discounts applied: {details}")
             return savings, details
         except Exception as e:
             st.error(f"Error applying package discounts: {e}")
             logger.error(f"Error applying package discounts: {e}")
             return 0, []
-    
+
     def apply_fixed_discount(self, total):
         """Apply fixed amount discounts based on the total."""
         try:
@@ -250,66 +282,66 @@ class Cashier:
             st.error(f"Error applying fixed discounts: {e}")
             logger.error(f"Error applying fixed discounts: {e}")
             return 0, "No Fixed Discounts Applied."
-    
+
     def checkout(self, cart, apply_coupon=False):
         """Calculate total and apply discounts."""
         try:
             if not cart:
                 return "Your cart is empty.", 0, []
-    
+
             total_before_discounts = sum(
                 details["price"] * details["quantity"] for details in cart.values()
             )
             output = f"Total before discounts: ${total_before_discounts:.2f}\n"
-    
+
             package_savings, package_details = self.apply_package_discounts(cart)
             total_after_packages = total_before_discounts - package_savings
             output += f"Package Discounts Savings: -${package_savings:.2f}\n"
             for detail in package_details:
                 output += detail + "\n"
-    
+
             fixed_discount, fixed_discount_msg = self.apply_fixed_discount(total_after_packages)
             total_after_fixed = total_after_packages - fixed_discount
             output += fixed_discount_msg + "\n"
-    
+
             coupon_savings = 0
             if apply_coupon:
                 coupon_savings = 5
                 output += f"Coupon Savings: -$5.00\n"
-    
+
             total_after_coupon = total_after_fixed - coupon_savings
             output += f"Final Total: ${total_after_coupon:.2f}\n"
-    
+
             # Collect all discounts for the receipt
             discounts_used = package_details
             if fixed_discount > 0:
                 discounts_used.append(f"Fixed Discount: -${fixed_discount:.2f}")
             if apply_coupon:
                 discounts_used.append("Coupon Discount: -$5.00")
-    
+
             logger.info(f"Checkout summary: Final total - ${total_after_coupon:.2f}")
             return output, total_after_coupon, discounts_used
         except Exception as e:
             st.error(f"Error during checkout: {e}")
             logger.error(f"Error during checkout: {e}")
             return "An error occurred during checkout.", 0, []
-    
+
     def log_receipt_to_sqlite(self, cart, total, payment_method, payment_amount, change, discounts_used):
         """Log the receipt to the SQLite database."""
         try:
             receipt_id = datetime.datetime.now().strftime('%Y%m%d%H%M%S')  # Unique ID based on timestamp
             utc_now = datetime.datetime.now(pytz.utc).astimezone(pytz.timezone("Asia/Hong_Kong"))
             date_obj = utc_now.replace(tzinfo=None)  # Remove timezone info for storage
-    
+
             # Create a summary of the products
             products_summary = "; ".join([f"{details['name']} x {details['quantity']}" for details in cart.values()])
-    
+
             # Create a summary of discounts
             discounts_summary = "; ".join(discounts_used) if discounts_used else "None"
-    
+
             # Calculate total before discounts
             total_before_discounts = sum(details['price'] * details['quantity'] for details in cart.values())
-    
+
             # Create a Receipt instance
             receipt = Receipt(
                 receipt_id=receipt_id,
@@ -322,7 +354,7 @@ class Cashier:
                 payment_amount=payment_amount,
                 change=change
             )
-    
+
             # Add to session and commit
             self.session.add(receipt)
             self.session.commit()
@@ -332,7 +364,7 @@ class Cashier:
             self.session.rollback()
             st.error(f"Failed to log receipt to the database: {e}")
             logger.error(f"Failed to log receipt: {e}")
-    
+
     def get_all_receipts(self):
         """Retrieve all receipts from the database."""
         try:
@@ -342,7 +374,7 @@ class Cashier:
             st.error(f"Error retrieving receipts: {e}")
             logger.error(f"Error retrieving receipts: {e}")
             return []
-    
+
     def edit_receipt(self, receipt_id, new_payment_method=None, new_payment_amount=None):
         """Edit an existing receipt's payment method and payment amount."""
         try:
@@ -364,7 +396,7 @@ class Cashier:
             self.session.rollback()
             st.error(f"Error editing receipt: {e}")
             logger.error(f"Error editing receipt ID {receipt_id}: {e}")
-    
+
     def delete_receipt(self, receipt_id):
         """Delete a receipt from the database."""
         try:
@@ -381,7 +413,7 @@ class Cashier:
             self.session.rollback()
             st.error(f"Error deleting receipt: {e}")
             logger.error(f"Error deleting receipt ID {receipt_id}: {e}")
-    
+
     def log_receipt(self, cart, total, payment_method, payment_amount, change, discounts_used):
         """Log the receipt to SQLite and generate receipt content."""
         try:
@@ -389,41 +421,41 @@ class Cashier:
             utc_now = datetime.datetime.now(pytz.utc).astimezone(pytz.timezone("Asia/Hong_Kong"))
             receipt_content = f"--- Receipt ---\n"
             receipt_content += f"Date: {utc_now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8)\n\n"
-    
+
             receipt_content += "{:<20} {:<10} {:<10} {:<10}\n".format(
                 "Product Name", "Quantity", "Price ($)", "Subtotal ($)"
             )
             receipt_content += "-" * 60 + "\n"
-    
+
             for pid, details in cart.items():
                 subtotal = details["price"] * details["quantity"]
                 receipt_content += "{:<20} {:<10} {:<10} {:<10}\n".format(
                     details["name"], details["quantity"], details["price"], subtotal
                 )
-    
+
             receipt_content += "-" * 60 + "\n"
             receipt_content += f"Total Before Discounts: ${sum(details['price'] * details['quantity'] for details in cart.values()):.2f}\n"
-    
+
             # Include the discounts applied
             receipt_content += "\n--- Discounts Applied ---\n"
             for discount in discounts_used:
                 receipt_content += discount + "\n"
-    
+
             receipt_content += f"\nFinal Total: ${total:.2f}\n"
             receipt_content += f"Payment Method: {payment_method}\n"
             receipt_content += f"Payment Amount: ${payment_amount:.2f}\n"
             receipt_content += f"Change: ${change:.2f}\n"
             receipt_content += "--- Thank You! ---\n\n"
-    
+
             # Log to Database
             self.log_receipt_to_sqlite(cart, total, payment_method, payment_amount, change, discounts_used)
-    
+
             return receipt_content
         except Exception as e:
             st.error(f"Error logging receipt: {e}")
             logger.error(f"Error logging receipt: {e}")
             return "An error occurred while logging the receipt."
-    
+
     def get_receipts_dataframe(self):
         """Convert session receipts to a pandas DataFrame."""
         # For downloading receipts
@@ -448,7 +480,7 @@ class Cashier:
             st.error(f"Error converting receipts to DataFrame: {e}")
             logger.error(f"Error converting receipts to DataFrame: {e}")
             return None
-    
+
     def view_receipts(self):
         """Display all receipts from the database for debugging."""
         try:
@@ -509,7 +541,8 @@ if menu == "View Products":
 elif menu == "Add to Cart":
     st.header("Add to Cart")
     # Map product names to IDs for selection
-    product_name_to_id = {p.name: p.id for p in cashier.get_all_products()}
+    products = cashier.get_all_products()
+    product_name_to_id = {p.name: p.id for p in products}
     if product_name_to_id:
         product_name = st.selectbox("Select Product", list(product_name_to_id.keys()))
         product_id = product_name_to_id[product_name]
